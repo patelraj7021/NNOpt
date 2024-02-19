@@ -5,10 +5,13 @@ Created on Fri Feb 16 21:43:17 2024
 @author: patel
 """
 
-
-from multiprocessing import Pool
-import numpy as np
 import time
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '0'
+
 
 
 def wait_rand_time(time_in):
@@ -16,10 +19,17 @@ def wait_rand_time(time_in):
     return time_in
 
 
-if __name__ == '__main__':
-    pool_input = [10, 14, 20, 12, 24, 2]
-    t_s = time.perf_counter()
-    with Pool(6) as p:    
-        testing_output = p.map(wait_rand_time, pool_input)
-    t_f = time.perf_counter() - t_s
-    print(t_f)
+def init_model_arch(lyrs, nodes, hidden_act, out_act, num_in_vars):
+    if type(lyrs) is not int or type(nodes) is not int \
+        or type(num_in_vars) is not int:
+            raise TypeError('Number of layers, nodes, and input variables \
+                            must be integers.')
+    
+    model_arch = Sequential()
+    model_arch.add(Dense(nodes, input_shape=(num_in_vars,), 
+                         activation=hidden_act))
+    for i in range(lyrs-1):
+        model_arch.add(Dense(nodes, activation=hidden_act))
+    model_arch.add(Dense(1, activation=out_act))
+    return model_arch
+
