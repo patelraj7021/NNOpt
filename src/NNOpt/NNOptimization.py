@@ -8,7 +8,7 @@ Created on Fri Feb 16 21:43:17 2024
 import time
 import os
 import random
-from sklearn import train_test_split
+# from scikit-learn import train_test_split
 
 # TensorFlow outputs unnecessary log messages
 # GPU is working fine
@@ -17,6 +17,7 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense
 import tensorflow as tf
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '0'
+from multiprocessing import Pool
 
 
 
@@ -53,42 +54,63 @@ def init_model_arch(lyrs, nodes, hidden_act, out_act, num_in_vars):
     return model_arch
 
 
-def split_train_vali_test(features_in, true_out, train_perc, vali_perc):
+def train_model(layers_num, training_in, true_out, eps,
+                opt_alg='RMSprop', loss_func='mse', batch_sz=64,
+                vali_perc=0.3):
     
-    total_rows = true_out.shape[0]
-    train_num = int(total_rows*train_perc)
-    test_num = total_rows - train_num
-    vali_num = int(train_num*vali_perc)
+    # check inputs
+    if type(vali_perc) is not float:
+        raise TypeError('Validation percentage must be float.')
+    if vali_perc > 1. or vali_perc == 0:
+        raise ValueError('Validation data percentage must be >0 and <1.')
+        
+    # run
+    if len(training_in.shape) == 1:
+        num_features = 1
+    else:
+        num_features = training_in.shape[1]
     
-    train_indices = random.sample()
+    model_arch = init_model_arch(layers_num, num_features+4,
+                                 'relu', 'linear', num_features)
     
-    return
+    model_arch.compile(loss=loss_func, optimizer=opt_alg)
+    model_results = model_arch.fit(training_in, true_out, 
+                                 epochs=eps, batch_size=batch_sz,
+                                 validation_split=vali_perc, verbose=0)
+    min_val_cost = round(min(model_results.history['val_loss']), 3)
+    print(f'{layers_num}-layer model trained; min(val_cost) = {min_val_cost}')
+          
+    return model_results
 
 
-def train_model(model_arch, features_in, true_out, 
-                opt_alg='Nadam', loss_func='mse', 
-                train_perc=0.8, vali_perc=0.3):
+#def 
+
+
+def loop_thru_models(features_in, target_vals):
     
     # check inputs
     if not tf.is_tensor(features_in):
         features_in = tf.convert_to_tensor(features_in)
-    if not tf.is_tensor(true_out):
-        true_out = tf.convert_to_tensor(true_out)
-    if features_in.shape[0] != true_out.shape[0]:
+    if not tf.is_tensor(target_vals):
+        target_vals = tf.convert_to_tensor(target_vals)
+    if features_in.shape[0] != target_vals.shape[0]:
         raise ValueError('Rows of input must be equal to rows of output.')
-    if type(train_perc) is not float or type(vali_perc) is not float:
-        raise TypeError('Training & validation percentages must be floats.')
-    if train_perc > 1. or train_perc == 0:
-        raise ValueError('Training data percentage must be >0 and <1.')
-    if vali_perc > 1. or vali_perc == 0:
-        raise ValueError('Validation data percentage must be >0 and <1.')
         
-    # run    
-    X_training, X_testing, y_training, y_testing = train_test_split(
-        features_in, true_out, train_size=train_perc)    
+    # run
+    # X_training, X_testing, y_training, y_testing = train_test_split(
+    #     features_in, true_out, train_size=train_perc)
     
-        
-    model_out = model_arch   
-    return model_out
+    num_layers_init_guess = [1, 2, 32, 64, 96, 128]
+    
+    pool_input = []
+    for i in num_layers_init_guess:
+        pool_input.append((i, features_in, target_vals, 100))
+       
+    cost_comp = {}
+    
+    with Pool(6) as p:
+        cost_comp = p.starmap(train_model, pool_input)
+           
+    return dict(zip(num_layers_init_guess, cost_comp))
     
 
