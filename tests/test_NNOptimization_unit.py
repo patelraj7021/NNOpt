@@ -80,10 +80,16 @@ class TestNNArch:
         assert output_layer_config['activation'] == in_params[3]
         
     
-# test the model training loop
-# class TestNNTraining:
+# test the get_max_num_layers function
+class TestGetMaxNumLayers:
     
-#     def test_
+    @pytest.mark.parametrize('in_params, exp_output', [
+                                (1, 128),
+                                (16, 64),
+                                (128, 32)
+                            ])
+    def test_get_max_num_layers(self, in_params, exp_output):
+        assert NNO.gen_max_num_layers(in_params) == exp_output
         
 
 if __name__=='__main__':

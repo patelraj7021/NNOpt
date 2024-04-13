@@ -48,14 +48,14 @@ if __name__=='__main__':
 
     X, y = create_third_order_poly_test(-5, 5, 1000, -2, 2)
     
-    # X_tens = tf.convert_to_tensor(y)
+    # X_tens = tf.convert_to_tensor(s)
     # print(X_tens.shape[0])
-    # coarse_loop_results = NNO.loop_thru_models(X, y)
-    plot_test = NNO.train_model(2, X, y, 500)[1]
-    fig, ax = plt.subplots()
-    ax.scatter(X, y, color='black')
-    ax.scatter(X, plot_test.predict(X), color='red')
-    fig.savefig('prediction_test.pdf')
+    coarse_loop_results = NNO.find_best_num_layers(X, y)
+    # plot_test = NNO.train_model(2, X, y, 500)[1]
+    # fig, ax = plt.subplots()
+    # ax.scatter(X, y, color='black')
+    # ax.scatter(X, plot_test.predict(X), color='red')
+    # fig.savefig('prediction_test.pdf')
     
     
     
