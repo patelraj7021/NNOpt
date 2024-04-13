@@ -64,9 +64,11 @@ def train_model(layers_num, training_in, true_out, eps,
     if vali_perc > 1. or vali_perc == 0:
         raise ValueError('Validation data percentage must be >0 and <1.')
         
-    # run
+    # get num. of features
     if len(training_in.shape) == 1:
         num_features = 1
+    elif len(training_in.shape) > 2:
+        raise TypeError('Rank of training data cannot be higher than two.')
     else:
         num_features = training_in.shape[1]
     
@@ -74,13 +76,13 @@ def train_model(layers_num, training_in, true_out, eps,
                                  'relu', 'linear', num_features)
     
     model_arch.compile(loss=loss_func, optimizer=opt_alg)
-    model_results = model_arch.fit(training_in, true_out, 
+    fitting_results = model_arch.fit(training_in, true_out, 
                                  epochs=eps, batch_size=batch_sz,
                                  validation_split=vali_perc, verbose=0)
-    min_val_cost = round(min(model_results.history['val_loss']), 3)
+    min_val_cost = round(min(fitting_results.history['val_loss']), 3)
     print(f'{layers_num}-layer model trained; min(val_cost) = {min_val_cost}')
           
-    return model_results
+    return fitting_results, model_arch
 
 
 #def 
@@ -109,7 +111,11 @@ def loop_thru_models(features_in, target_vals):
     cost_comp = {}
     
     with Pool(6) as p:
-        cost_comp = p.starmap(train_model, pool_input)
+        pool_results = p.starmap(train_model, pool_input)
+        
+    cost_comp = []
+    for pool_result in pool_results:
+        cost_comp.append(pool_result[0])
            
     return dict(zip(num_layers_init_guess, cost_comp))
     
