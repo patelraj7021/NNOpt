@@ -14,6 +14,8 @@ from src.NNOpt import NNOptimization as NNO
 import keras
 import numpy as np
 from matplotlib import pyplot as plt
+from sklearn.model_selection import train_test_split
+import pandas as pd
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import tensorflow as tf
@@ -46,16 +48,17 @@ def create_third_order_poly_test(x_start, x_end, num_x,
 
 if __name__=='__main__':
 
-    X, y = create_third_order_poly_test(-5, 5, 1000, -2, 2)
+    X, y = create_third_order_poly_test(-5, 5, 2000, -2, 2)
     
-    # X_tens = tf.convert_to_tensor(s)
-    # print(X_tens.shape[0])
-    coarse_loop_results = NNO.find_best_num_layers(X, y)
-    # plot_test = NNO.train_model(2, X, y, 500)[1]
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3,
+                                                        random_state=7021)
+    
+    # coarse_loop_results = NNO.find_best_num_layers(X, y)
+    
+    plot_test = NNO.bag_models(X_train, y_train, 3, 3, 500, X_test)
     # fig, ax = plt.subplots()
     # ax.scatter(X, y, color='black')
     # ax.scatter(X, plot_test.predict(X), color='red')
-    # fig.savefig('prediction_test.pdf')
     
     
     
