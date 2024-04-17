@@ -55,10 +55,10 @@ if __name__=='__main__':
     
     # coarse_loop_results = NNO.find_best_num_layers(X, y)
     
-    plot_test = NNO.bag_models(X_train, y_train, 3, 3, 500, X_test)
+    plot_test = NNO.find_best_num_layers(X_train, y_train, X_test)
     # fig, ax = plt.subplots()
-    # ax.scatter(X, y, color='black')
-    # ax.scatter(X, plot_test.predict(X), color='red')
+    # ax.scatter(X_test, y_test, color='black')
+    # ax.scatter(X_test, plot_test, color='red')
     
     
     

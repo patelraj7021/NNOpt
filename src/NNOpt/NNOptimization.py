@@ -104,19 +104,30 @@ def train_model(features_in, target_vals, layers_num, eps,
     return fitting_results, NN_model
 
 
-def bag_models(features_in, target_vals, bag_quantity, layers_num, eps,
-               testing_X, opt_alg='Nadam', loss_func='mse', batch_sz=64,
-               vali_perc=0.3):
+def exp_bag_weighted_avg(val_losses, predictions):
+    # expects np arrays as input
+    # val_losses: N by 1
+    # predictions: len(rows of testing_X) by N
+    # outputs np arrays
+    # exp weighing makes neg. std dev predictions highly weighed (good preds.)
+    # positive std dev predictions lowly weighed (bad preds.)
+    # look at exp(-x) for intuition; normalizing centers val_losses at 0
+    # implement maxes of -6 and +6 for normalized val_losses for stability
     
-    # check inputs
-    if not tf.is_tensor(features_in):
-        features_in = tf.convert_to_tensor(features_in)
-    if not tf.is_tensor(target_vals):
-        target_vals = tf.convert_to_tensor(target_vals)
-    if not tf.is_tensor(testing_X):
-        testing_X = tf.convert_to_tensor(testing_X)
-    if features_in.shape[0] != target_vals.shape[0]:
-        raise ValueError('Num. of rows of features and targets must be equal.')
+    val_losses_mean = np.mean(val_losses)
+    val_losses_std = np.std(val_losses) 
+    val_losses_norm = (val_losses - val_losses_mean) / val_losses_std
+    val_losses_norm_clipped = np.clip(val_losses_norm, -6., 6.)
+    weights = np.exp(-val_losses_norm_clipped)
+    weighed_sum = np.dot(predictions, weights)
+    weighed_average = weighed_sum / np.sum(weights)
+    
+    return weighed_average
+
+
+def bag_models(features_in, target_vals, bag_quantity, layers_num, eps,
+               testing_X=None, opt_alg='Nadam', loss_func='mse', batch_sz=64,
+               vali_perc=0.3):
     
     predicted_bag = []
     min_val_loss_bag = []
@@ -125,41 +136,40 @@ def bag_models(features_in, target_vals, bag_quantity, layers_num, eps,
         fitting_results, NN_model = train_model(features_in, target_vals,
                                                 layers_num, eps, opt_alg, 
                                                 loss_func, batch_sz, vali_perc)
+        
         predicted_vals = NN_model.predict(testing_X)
         predicted_bag.append(predicted_vals)
         min_val_loss = min(fitting_results.history['val_loss'])
         min_val_loss_bag.append(min_val_loss)
-        
-    predicted_bag_concat = np.concatenate(predicted_bag, axis=1)
-    predicted_med = np.median(predicted_bag_concat, axis=1)
-    predicted_low = np.percentile(predicted_bag_concat, 16, axis=1)
-    predicted_high = np.percentile(predicted_bag_concat, 84, axis=1)
-    predicted_comb = [predicted_low, predicted_med, predicted_high]
-    predicted_df = pd.DataFrame(np.concatenate(predicted_comb, axis=1),
-                                columns=['16_perc', 'med', '84_perc'])
     
-    min_val_loss_bag = np.array()
+    predicted_bag_array = np.concatenate(predicted_bag, axis=1)  
+    min_val_loss_bag_array = np.array(min_val_loss_bag)
+    weighted_preds = exp_bag_weighted_avg(min_val_loss_bag_array, 
+                                          predicted_bag_array)
     
-    return min_val_loss_bag, predicted_df
+    return min_val_loss_bag_array, weighted_preds
 
 
-def check_num_layers(features_in, target_vals, num_layers_list, eps):
+def check_num_layers(features_in, target_vals, num_layers_list, eps, 
+                     testing_X):
     
     num_CPU_cores = 6
-    
-    pool_input = []
-    for i in num_layers_list:
-        pool_input.append((features_in, target_vals, int(i), eps))
-       
-    cost_comp = {}
+    bag_quantity = 10
     
     # make a folder to save model weights for ModelCheckpoint
     # need to do this before multiprocessing starts
     if not os.path.isdir('model_saves'):
         os.mkdir('model_saves')
     
+    pool_input = []
+    for i in num_layers_list:
+        pool_input.append((features_in, target_vals, bag_quantity, int(i), 
+                           eps, testing_X))
+       
+    cost_comp = {}
+    
     with Pool(num_CPU_cores) as p:
-        pool_results = p.starmap(train_model, pool_input)
+        pool_results = p.starmap(bag_models, pool_input)
     
     # only want fitting results (history object) for this function
     cost_comp = []
@@ -191,20 +201,31 @@ def gen_max_num_layers(num_features):
     return max_num_layers
 
 
-def find_best_num_layers(features_in, target_vals):
+def find_best_num_layers(features_in, target_vals, testing_X):
+    
+    # check inputs
+    if not tf.is_tensor(features_in):
+        features_in = tf.convert_to_tensor(features_in)
+    if not tf.is_tensor(target_vals):
+        target_vals = tf.convert_to_tensor(target_vals)
+    if not tf.is_tensor(testing_X):
+        testing_X = tf.convert_to_tensor(testing_X)
+    if features_in.shape[0] != target_vals.shape[0]:
+        raise ValueError('Num. of rows of features and targets must be equal.')
     
     num_features = get_num_features(features_in)
     
     broad_search_start = 2
     broad_search_end = gen_max_num_layers(num_features)
-    broad_search_elements = 8
+    broad_search_elements = 4
     broad_search_eps = 500
     broad_search_list = make_num_layers_list(broad_search_start, 
                                              broad_search_end,
                                              broad_search_elements)
     broad_search_results = check_num_layers(features_in, target_vals, 
                                             broad_search_list, 
-                                            broad_search_eps)
+                                            broad_search_eps,
+                                            testing_X)
     
     return broad_search_results
     

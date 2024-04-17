@@ -33,7 +33,7 @@ def create_model_arch(request):
 
 
 # test the init_model_arch function
-class TestNNArch:
+class TestInitModelArch:
     
     # error input cases
     @pytest.mark.parametrize('in_params, exp_output', [
@@ -90,7 +90,7 @@ class TestGetMaxNumLayers:
                             ])
     def test_get_max_num_layers(self, in_params, exp_output):
         assert NNO.gen_max_num_layers(in_params) == exp_output
-        
+
 
 if __name__=='__main__':
 
