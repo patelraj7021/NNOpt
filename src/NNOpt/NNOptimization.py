@@ -8,6 +8,9 @@ Created on Fri Feb 16 21:43:17 2024
 import time
 import os
 import random
+from multiprocessing import Pool
+import numpy as np
+import pandas as pd
 # from scikit-learn import train_test_split
 
 # TensorFlow outputs unnecessary log messages
@@ -16,12 +19,34 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense
 from tensorflow.keras.callbacks import ModelCheckpoint
+from tensorflow.keras.callbacks import EarlyStopping
 import tensorflow as tf
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '0'
-from multiprocessing import Pool
-import numpy as np
-import pandas as pd
 
+
+
+def split_GPU(num_splits, mem_each_split):
+    # allow GPU memory to be fragmented so multiple models can be trained
+    # at the same time
+    
+    config_input = []
+    for i in range(num_splits):
+        config_input.append(tf.config.LogicalDeviceConfiguration(
+            memory_limit=mem_each_split))
+    
+    gpus = tf.config.list_physical_devices('GPU')
+    if gpus:
+      # Create 2 virtual GPUs with 1GB memory each
+      try:
+        tf.config.set_logical_device_configuration(
+            gpus[0], config_input)
+        logical_gpus = tf.config.list_logical_devices('GPU')
+        #print(len(gpus), "Physical GPU,", len(logical_gpus), "Logical GPUs")
+      except RuntimeError as e:
+        # Virtual devices must be set before GPUs have been initialized
+        print(e)
+        
+    return
 
 
 def init_model_arch(lyrs, nodes, hidden_act, out_act, num_in_vars):
@@ -89,11 +114,16 @@ def train_model(features_in, target_vals, layers_num, eps,
     save_best_model = ModelCheckpoint(best_model_path, monitor='val_loss', 
                                   save_best_only=True, save_weights_only=True)
     
+    early_stopping = EarlyStopping(monitor='val_loss',
+                                   patience=eps/10,
+                                   mode='min',
+                                   start_from_epoch=eps/10)
+    
     NN_model.compile(loss=loss_func, optimizer=opt_alg)
     fitting_results = NN_model.fit(features_in, target_vals, 
                                  epochs=eps, batch_size=batch_sz,
                                  validation_split=vali_perc, verbose=0,
-                                 callbacks=[save_best_model])
+                                 callbacks=[save_best_model, early_stopping])
     
     # select the best model
     NN_model.load_weights(best_model_path)
@@ -126,7 +156,7 @@ def exp_bag_weighted_avg(val_losses, predictions):
 
 
 def bag_models(features_in, target_vals, bag_quantity, layers_num, eps,
-               testing_X=None, opt_alg='Nadam', loss_func='mse', batch_sz=64,
+               testing_X, opt_alg='Nadam', loss_func='mse', batch_sz=64,
                vali_perc=0.3):
     
     predicted_bag = []
@@ -154,22 +184,33 @@ def check_num_layers(features_in, target_vals, num_layers_list, eps,
                      testing_X):
     
     num_CPU_cores = 6
-    bag_quantity = 10
+    if len(tf.config.list_physical_devices('GPU')) > 0:
+        split_GPU(6, 1024)
+        GPU_mode = True
+    bag_quantity = 3
     
     # make a folder to save model weights for ModelCheckpoint
     # need to do this before multiprocessing starts
     if not os.path.isdir('model_saves'):
         os.mkdir('model_saves')
     
-    pool_input = []
-    for i in num_layers_list:
-        pool_input.append((features_in, target_vals, bag_quantity, int(i), 
-                           eps, testing_X))
-       
-    cost_comp = {}
     
-    with Pool(num_CPU_cores) as p:
-        pool_results = p.starmap(bag_models, pool_input)
+    if not GPU_mode:
+        pool_input = []
+        for i in num_layers_list:
+            pool_input.append((features_in, target_vals, bag_quantity, int(i), 
+                               eps, testing_X))
+        with Pool(num_CPU_cores) as p:
+            pool_results = p.starmap(bag_models, pool_input)
+    
+    if GPU_mode:
+        pool_results = []
+        gpus = tf.config.list_logical_devices('GPU')
+        for gpu in gpus:
+            with tf.device(gpu.name):
+                pool_results.append(bag_models(features_in, target_vals, 
+                                               bag_quantity, int(i), 
+                                               eps, testing_X))
     
     # only want fitting results (history object) for this function
     cost_comp = []
@@ -177,6 +218,12 @@ def check_num_layers(features_in, target_vals, num_layers_list, eps,
         cost_comp.append(pool_result[0])
            
     return dict(zip(num_layers_list, cost_comp))
+
+
+def divide_chunks(list_in, len_chunk):       
+    # looping till length l 
+    for i in range(0, len(list_in), len_chunk):  
+        yield list_in[i:i + len_chunk] 
 
 
 def make_num_layers_list(start_num, end_num, test_num):
