@@ -11,7 +11,8 @@ import random
 from multiprocessing import Pool
 import numpy as np
 import pandas as pd
-# from scikit-learn import train_test_split
+from sklearn.model_selection import train_test_split
+import math
 
 # TensorFlow outputs unnecessary log messages
 # GPU is working fine
@@ -36,17 +37,39 @@ def split_GPU(num_splits, mem_each_split):
     
     gpus = tf.config.list_physical_devices('GPU')
     if gpus:
-      # Create 2 virtual GPUs with 1GB memory each
+      # Create num_splits virtual GPUs with mem_each_split memory each
       try:
         tf.config.set_logical_device_configuration(
             gpus[0], config_input)
-        logical_gpus = tf.config.list_logical_devices('GPU')
-        #print(len(gpus), "Physical GPU,", len(logical_gpus), "Logical GPUs")
+        # logical_gpus = tf.config.list_logical_devices('GPU')
+        # print(len(gpus), "Physical GPU,", len(logical_gpus), "Logical GPUs")
       except RuntimeError as e:
         # Virtual devices must be set before GPUs have been initialized
         print(e)
         
     return
+
+
+class NNOptimizer:
+    
+    # need to do generalize this for any computer
+    num_CPU_cores = 6
+    num_GPUs = 6
+    each_GPU_mem = 1024
+    if len(tf.config.list_physical_devices('GPU')) > 0:
+        split_GPU(num_GPUs, each_GPU_mem)
+        GPU_mode = True
+    else: 
+        GPU_mode = False
+    
+    def __init__(self, X, y, test_per=0.3):
+        X_train, X_test, y_train, y_test = train_test_split(X, y, 
+                                                            test_size=test_per,
+                                                            random_state=7021)
+        self.features_in = tf.convert_to_tensor(X_train)
+        self.target_vals = tf.convert_to_tensor(y_train)
+        self.testing_X = tf.convert_to_tensor(X_test)
+        self.testing_y = tf.convert_to_tensor(y_test)
 
 
 def init_model_arch(lyrs, nodes, hidden_act, out_act, num_in_vars):
@@ -184,9 +207,14 @@ def check_num_layers(features_in, target_vals, num_layers_list, eps,
                      testing_X):
     
     num_CPU_cores = 6
+    num_GPUs = 6
+    each_GPU_mem = 1024
     if len(tf.config.list_physical_devices('GPU')) > 0:
-        split_GPU(6, 1024)
+        split_GPU(num_GPUs, each_GPU_mem)
         GPU_mode = True
+    else: 
+        GPU_mode = False
+        
     bag_quantity = 3
     
     # make a folder to save model weights for ModelCheckpoint
@@ -196,21 +224,27 @@ def check_num_layers(features_in, target_vals, num_layers_list, eps,
     
     
     if not GPU_mode:
+        # CPU mode
         pool_input = []
         for i in num_layers_list:
             pool_input.append((features_in, target_vals, bag_quantity, int(i), 
                                eps, testing_X))
         with Pool(num_CPU_cores) as p:
             pool_results = p.starmap(bag_models, pool_input)
-    
-    if GPU_mode:
+    else:
+        # GPU mode
         pool_results = []
         gpus = tf.config.list_logical_devices('GPU')
-        for gpu in gpus:
+        # randomize list order so low nums aren't grouped together
+        random.shuffle(num_layers_list)
+        num_layers_array = np.array(num_layers_list)
+        num_layers_array_chunks = np.array_split(num_layers_array, num_GPUs)
+        for i, gpu in enumerate(gpus):
             with tf.device(gpu.name):
                 pool_results.append(bag_models(features_in, target_vals, 
-                                               bag_quantity, int(i), 
-                                               eps, testing_X))
+                                               bag_quantity, 
+                                               list(num_layers_array_chunks[i])
+                                               , eps, testing_X))
     
     # only want fitting results (history object) for this function
     cost_comp = []
@@ -251,10 +285,6 @@ def gen_max_num_layers(num_features):
 def find_best_num_layers(features_in, target_vals, testing_X):
     
     # check inputs
-    if not tf.is_tensor(features_in):
-        features_in = tf.convert_to_tensor(features_in)
-    if not tf.is_tensor(target_vals):
-        target_vals = tf.convert_to_tensor(target_vals)
     if not tf.is_tensor(testing_X):
         testing_X = tf.convert_to_tensor(testing_X)
     if features_in.shape[0] != target_vals.shape[0]:
