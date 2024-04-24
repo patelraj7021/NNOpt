@@ -50,6 +50,17 @@ def split_GPU(num_splits, mem_each_split):
     return
 
 
+def get_num_features(features_in):
+    # get num. of features
+    if len(features_in.shape) == 1:
+        num_features = 1
+    elif len(features_in.shape) > 2:
+        raise TypeError('Rank of training data cannot be higher than two.')
+    else:
+        num_features = features_in.shape[1]
+    return num_features
+
+
 class NNOptimizer:
     
     # need to do generalize this for any computer
@@ -62,7 +73,17 @@ class NNOptimizer:
     else: 
         GPU_mode = False
     
+    
     def __init__(self, X, y, test_per=0.3):
+        
+        if not isinstance(X, np.ndarray) and not isinstance(X, pd.Series) and \
+            not isinstance(X, pd.DataFrame):
+                raise TypeError(
+                'X input must be a NumPy array or pandas Series/Dataframe.')
+        if not isinstance(y, np.ndarray) and not isinstance(y, pd.Series):
+                raise TypeError(
+                'y output must be a NumPy array or pandas Series.')
+        
         X_train, X_test, y_train, y_test = train_test_split(X, y, 
                                                             test_size=test_per,
                                                             random_state=7021)
@@ -70,6 +91,22 @@ class NNOptimizer:
         self.target_vals = tf.convert_to_tensor(y_train)
         self.testing_X = tf.convert_to_tensor(X_test)
         self.testing_y = tf.convert_to_tensor(y_test)
+        
+        self.num_features = get_num_features(self.features_in)
+        
+        self.scanning_models = []
+        self.scanning_val_losses = {}
+    
+    
+    def add_model_to_scan_list(self, lyrs, nodes, hidden_act, out_act):
+        new_model = Sequential()
+        new_model.add(Dense(nodes, input_shape=(self.num_features,), 
+                             activation=hidden_act))
+        for i in range(lyrs-1):
+            new_model.add(Dense(nodes, activation=hidden_act))
+        new_model.add(Dense(1, activation=out_act))
+        self.scanning_models.append(new_model)
+        return
 
 
 def init_model_arch(lyrs, nodes, hidden_act, out_act, num_in_vars):
@@ -98,17 +135,6 @@ def init_model_arch(lyrs, nodes, hidden_act, out_act, num_in_vars):
         print(
         'Check keras documentation for valid activation and output functions.')
     return model_arch
-
-
-def get_num_features(features_in):
-    # get num. of features
-    if len(features_in.shape) == 1:
-        num_features = 1
-    elif len(features_in.shape) > 2:
-        raise TypeError('Rank of training data cannot be higher than two.')
-    else:
-        num_features = features_in.shape[1]
-    return num_features
 
 
 def train_model(features_in, target_vals, layers_num, eps,

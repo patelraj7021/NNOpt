@@ -8,7 +8,6 @@ Created on Mon Feb 19 01:19:13 2024
 import sys
 import os
 import pytest
-from multiprocessing import Pool
 sys.path.append(os.path.dirname(os.getcwd())) 
 from src.NNOpt import NNOptimization as NNO
 import keras
