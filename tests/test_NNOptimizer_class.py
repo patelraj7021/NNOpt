@@ -12,43 +12,98 @@ sys.path.append(os.path.dirname(os.getcwd()))
 from src.NNOpt import NNOptimization as NNO
 import numpy as np
 
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+import tensorflow as tf
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '0'
 
 
-def third_order_poly(x, c):
-    return c[3]*(x**3) + c[2]*(x**2) + c[1]*x + c[0]
+
+def univar_third_order_poly(X, c):
+    return c[3]*(X[:,0]**3) + c[2]*(X[:,0]**2) + c[1]*X[:,0] + c[0]
 
 
-def create_third_order_poly_test(x_start, x_end, num_x, 
-                                 coeff_start, coeff_end):
-    x_range = np.linspace(x_start, x_end, num_x)
-    rand_coeffs = np.random.uniform(coeff_start, coeff_end, 4)
-    y_poly = third_order_poly(x_range, rand_coeffs)
-    noise_amp = abs((max(y_poly) - min(y_poly))*0.025)
-    noise = np.random.normal(-noise_amp, noise_amp, len(x_range))
-    return x_range, y_poly+noise
+def multivar_first_order_poly(X, c):
+    return c[0]*X[:,0] + c[1]*X[:,1] + c[2]
 
 
-# working input cases
-@pytest.fixture(params=[
-                (create_third_order_poly_test(-5, 5, 1000, -2, -2))
-                ])  
-def create_NNOptimizer_instance(request):
-    in_params = request.param
-    output = NNO.NNOptimizer(*in_params)
-    return in_params, output
+def generate_test_data(X_ranges, X_num,
+                       coeff_start, coeff_end, func, num_coeff,
+                       noise_amp_frac=0.025):
+    
+    ranges_list = []
+    for active_range in X_ranges:
+        new_range = np.linspace(active_range[0], active_range[1], X_num)
+        ranges_list.append(new_range)
+    X = np.array(ranges_list).T
+    rand_coeffs = np.random.uniform(coeff_start, coeff_end, num_coeff)
+    y = func(X, rand_coeffs)
+    noise_amp = abs((max(y) - min(y))*noise_amp_frac)
+    noise = np.random.normal(0, noise_amp, X_num)
+    return X, y+noise
 
 
+@pytest.mark.parametrize('data_params_in, exp_output', [
+    (([(-5, 5)], 1000, -2, 2, univar_third_order_poly, 4), [1]),
+    (([(-5, 5), (-2, 2)], 1000, -2, 2, multivar_first_order_poly, 4), [2])
+    ])
 class TestInit:
     
+    def test_num_features(self, data_params_in, exp_output):
+        data_in = generate_test_data(*data_params_in)
+        nnopt_inst = NNO.NNOptimizer(*data_in)
+        assert nnopt_inst.num_features == exp_output[0]
     
-    def test_num_features(self, create_NNOptimizer_instance):
-        in_params, output = create_NNOptimizer_instance
-        X = in_params[0]
-        if len(X.shape) == 1:
-            X_num_cols = 1
-        else:
-            X_num_cols = X.shape[-1]
-        assert output.num_features == X_num_cols
+    def test_tensor_conversion(self, data_params_in, exp_output):
+        data_in = generate_test_data(*data_params_in)
+        nnopt_inst = NNO.NNOptimizer(*data_in)
+        assert tf.is_tensor(nnopt_inst.features_in) == True
+
+
+# cases for TestAddModelToScanList
+@pytest.fixture(params=[
+                (3, 8, 'relu', 'linear'), 
+                (1, 4, 'relu', 'linear')
+                ])  
+def create_model_arch(request):
+    data_in = generate_test_data([(-5, 5)], 1000, -2, 2, 
+                                 univar_third_order_poly, 4)
+    nnopt_inst = NNO.NNOptimizer(*data_in)
+    in_params = request.param
+    nnopt_inst.add_model_to_scan_list(*in_params)
+    return in_params, nnopt_inst
+
+class TestAddModelToScanList:
+    
+    def test_num_layers(self, create_model_arch):
+        in_params, nnopt_inst = create_model_arch
+        model_out = nnopt_inst.scanning_models[-1]
+        # len(*.layers) returns output layer too, so minus 1 for that
+        assert len(model_out.layers) - 1 == in_params[0] 
+
+    def test_num_nodes(self, create_model_arch):
+        in_params, nnopt_inst = create_model_arch
+        model_out = nnopt_inst.scanning_models[-1]
+        first_layer_config = model_out.get_layer(index=0).get_config()
+        assert first_layer_config['units'] == in_params[1]
+        
+    def test_num_inputs(self, create_model_arch):
+        in_params, nnopt_inst = create_model_arch
+        model_out = nnopt_inst.scanning_models[-1]
+        input_layer_config = model_out.get_layer(index=0).get_build_config()
+        assert input_layer_config['input_shape'] == (None, 
+                                                     nnopt_inst.num_features)
+        
+    def test_activation_func(self, create_model_arch):
+        in_params, nnopt_inst = create_model_arch
+        model_out = nnopt_inst.scanning_models[-1]
+        first_layer_config = model_out.get_layer(index=0).get_config()
+        assert first_layer_config['activation'] == in_params[2]
+    
+    def test_output_func(self, create_model_arch):
+        in_params, nnopt_inst = create_model_arch
+        model_out = nnopt_inst.scanning_models[-1]
+        output_layer_config = model_out.get_layer(index=-1).get_config()
+        assert output_layer_config['activation'] == in_params[3]
         
         
 

@@ -63,7 +63,7 @@ def get_num_features(features_in):
 
 class NNOptimizer:
     
-    # need to do generalize this for any computer
+    # TO DO: generalize this for any computer
     num_CPU_cores = 6
     num_GPUs = 6
     each_GPU_mem = 1024
@@ -107,34 +107,6 @@ class NNOptimizer:
         new_model.add(Dense(1, activation=out_act))
         self.scanning_models.append(new_model)
         return
-
-
-def init_model_arch(lyrs, nodes, hidden_act, out_act, num_in_vars):
-    
-    # check inputs
-    if type(lyrs) is not int or type(nodes) is not int \
-        or type(num_in_vars) is not int: 
-            raise TypeError(
-            'Number of layers, nodes, and input variables must be integers.')
-    if lyrs == 0 or nodes == 0 or num_in_vars == 0:
-        raise ValueError(
-        'Number of layers, nodes, and input variables must be greater than 0.')
-    if type(hidden_act) is not str or type(out_act) is not str:
-        raise TypeError(
-        'Hidden and output layer activation names must be strings.')
-    
-    # run
-    try:
-        model_arch = Sequential()
-        model_arch.add(Dense(nodes, input_shape=(num_in_vars,), 
-                             activation=hidden_act))
-        for i in range(lyrs-1):
-            model_arch.add(Dense(nodes, activation=hidden_act))
-        model_arch.add(Dense(1, activation=out_act))
-    except ValueError:
-        print(
-        'Check keras documentation for valid activation and output functions.')
-    return model_arch
 
 
 def train_model(features_in, target_vals, layers_num, eps,
