@@ -93,20 +93,64 @@ class NNOptimizer:
         self.testing_y = tf.convert_to_tensor(y_test)
         
         self.num_features = get_num_features(self.features_in)
+        self.num_nodes = self.num_features + 4
+        self.hidden_act = 'relu'
+        self.out_act = 'linear'
+        self.batch_size = 64
+        self.vali_perc = 0.3
         
         self.scanning_models = []
         self.scanning_val_losses = {}
+        
+        self.opt_alg = 'Nadam'
+        self.loss_func = 'mse'
     
     
-    def add_model_to_scan_list(self, lyrs, nodes, hidden_act, out_act):
+    def add_model_to_scan_list(self, lyrs, opt_alg):
         new_model = Sequential()
-        new_model.add(Dense(nodes, input_shape=(self.num_features,), 
-                             activation=hidden_act))
+        new_model.add(Dense(self.nodes, input_shape=(self.num_features,), 
+                             activation=self.hidden_act))
         for i in range(lyrs-1):
-            new_model.add(Dense(nodes, activation=hidden_act))
-        new_model.add(Dense(1, activation=out_act))
+            new_model.add(Dense(self.nodes, activation=self.hidden_act))
+        new_model.add(Dense(1, activation=self.out_act))
+        new_model.compile(loss=self.loss_func, optimizer=opt_alg)
         self.scanning_models.append(new_model)
         return
+    
+    
+    def scan_models(self, eps):
+        
+        return_dict = {}
+        
+        for model in self.scanning_models:
+            rand_ID = gen_rand_ID()
+            best_model_path = os.path.join('model_saves', 
+                                           f'weights_{rand_ID}.hdf5')
+            # save model with best val_loss, not the end state model
+            save_best_model = ModelCheckpoint(best_model_path, 
+                                              monitor='val_loss', 
+                                              save_best_only=True, 
+                                              save_weights_only=True)
+            early_stopping = EarlyStopping(monitor='val_loss',
+                                           patience=eps/10,
+                                           mode='min',
+                                           start_from_epoch=eps/10)
+            fitting_results = model.fit(self.features_in, self.target_vals,
+                                        epochs=eps, batch_size=self.batch_size,
+                                        validation_split=self.vali_perc,
+                                        verbose=0, 
+                                        callbacks=[save_best_model, 
+                                                   early_stopping])
+            model.load_weights(best_model_path)
+        return
+
+
+def gen_rand_ID():
+    num_existing_models = len(os.listdir('model_saves'))
+    rand_num = int(abs(7.*np.random.randn(1))*10000 - num_existing_models)
+    rand_ID = str(rand_num) + str(num_existing_models)
+    rand_ID = rand_ID.zfill(8)   
+    return rand_ID
 
 
 def train_model(features_in, target_vals, layers_num, eps,
