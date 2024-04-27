@@ -87,6 +87,18 @@ class NNOptimizer:
         X_train, X_test, y_train, y_test = train_test_split(X, y, 
                                                             test_size=test_per,
                                                             random_state=7021)
+        
+        X_train, X_vali, y_train, y_vali = train_test_split(X_train, y_train,
+                                                            test_size=test_per,
+                                                            random_state=752)
+        
+        self.training_data = tf.data.Dataset.from_tensor_slices(
+            (X_train, y_train))
+        self.vali_data = tf.data.Dataset.from_tensor_slices(
+            (X_vali, y_vali))
+        self.testing_data = tf.data.Dataset.from_tensor_slices(
+            (X_test, y_test))
+        
         self.features_in = tf.convert_to_tensor(X_train)
         self.target_vals = tf.convert_to_tensor(y_train)
         self.testing_X = tf.convert_to_tensor(X_test)
@@ -96,52 +108,66 @@ class NNOptimizer:
         self.num_nodes = self.num_features + 4
         self.hidden_act = 'relu'
         self.out_act = 'linear'
-        self.batch_size = 64
+        self.batch_size = 254
         self.vali_perc = 0.3
         
         self.scanning_models = []
-        self.scanning_val_losses = {}
+        self.trained_val_costs = {}
+        self.trained_models = {}
         
         self.opt_alg = 'Nadam'
         self.loss_func = 'mse'
     
     
     def add_model_to_scan_list(self, lyrs, opt_alg):
-        new_model = Sequential()
-        new_model.add(Dense(self.nodes, input_shape=(self.num_features,), 
-                             activation=self.hidden_act))
-        for i in range(lyrs-1):
-            new_model.add(Dense(self.nodes, activation=self.hidden_act))
-        new_model.add(Dense(1, activation=self.out_act))
-        new_model.compile(loss=self.loss_func, optimizer=opt_alg)
+        strategy = tf.distribute.MirroredStrategy()
+        with strategy.scope():
+            new_model = Sequential()
+            new_model.add(Dense(self.num_nodes, 
+                                input_shape=(self.num_features,), 
+                                activation=self.hidden_act))
+            for i in range(lyrs-1):
+                new_model.add(Dense(self.num_nodes, activation=self.hidden_act))
+            new_model.add(Dense(1, activation=self.out_act))
+            new_model.compile(loss=self.loss_func, optimizer=opt_alg)
         self.scanning_models.append(new_model)
         return
     
     
-    def scan_models(self, eps):
-        
-        return_dict = {}
+    def train_models(self, eps):
         
         for model in self.scanning_models:
             rand_ID = gen_rand_ID()
-            best_model_path = os.path.join('model_saves', 
-                                           f'weights_{rand_ID}.hdf5')
+            # best_model_path = os.path.join('model_saves', 
+            #                                f'weights_{rand_ID}.hdf5')
             # save model with best val_loss, not the end state model
-            save_best_model = ModelCheckpoint(best_model_path, 
-                                              monitor='val_loss', 
-                                              save_best_only=True, 
-                                              save_weights_only=True)
+            # save_best_model = ModelCheckpoint(best_model_path, 
+            #                                   monitor='val_loss', 
+            #                                   save_best_only=True, 
+            #                                   save_weights_only=True)
             early_stopping = EarlyStopping(monitor='val_loss',
                                            patience=eps/10,
                                            mode='min',
-                                           start_from_epoch=eps/10)
-            fitting_results = model.fit(self.features_in, self.target_vals,
+                                           start_from_epoch=eps/10,
+                                           restore_best_weights=True)
+            
+            fitting_results = model.fit(self.training_data,
                                         epochs=eps, batch_size=self.batch_size,
-                                        validation_split=self.vali_perc,
+                                        validation_data=self.vali_data,
                                         verbose=0, 
-                                        callbacks=[save_best_model, 
-                                                   early_stopping])
-            model.load_weights(best_model_path)
+                                        callbacks=[early_stopping])
+            min_val_cost = round(min(fitting_results.history['val_loss']), 3)
+            
+            # model.load_weights(best_model_path)
+            model_num_layers = len(model.layers) - 1
+            model_compiler = model.get_compile_config()['optimizer']
+            model_ID = f'{rand_ID}_{model_num_layers}_{model_compiler}'
+            
+            self.trained_models[model_ID] = model
+            self.trained_val_costs[model_ID] = min_val_cost
+        
+        self.scanning_models = []
+        
         return
 
 

@@ -50,13 +50,10 @@ if __name__=='__main__':
 
     X, y = create_third_order_poly_test(-5, 5, 2000, -2, 2)
     
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3,
-                                                        random_state=7021)
-    
-    plot_test = NNO.find_best_num_layers(X_train, y_train, X_test)
-    # fig, ax = plt.subplots()
-    # ax.scatter(X_test, y_test, color='black')
-    # ax.scatter(X_test, plot_test, color='red')
+    nnopt_inst = NNO.NNOptimizer(X, y)
+    nnopt_inst.add_model_to_scan_list(3, 'Nadam')
+    nnopt_inst.add_model_to_scan_list(4, 'Adam')
+    nnopt_inst.train_models(10)
     
     
     

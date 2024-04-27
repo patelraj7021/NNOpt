@@ -61,8 +61,8 @@ class TestInit:
 
 # cases for TestAddModelToScanList
 @pytest.fixture(params=[
-                (3, 8, 'relu', 'linear'), 
-                (1, 4, 'relu', 'linear')
+                (3, 'Nadam'), 
+                (1, 'Nadam')
                 ])  
 def create_model_arch(request):
     data_in = generate_test_data([(-5, 5)], 1000, -2, 2, 
@@ -84,7 +84,7 @@ class TestAddModelToScanList:
         in_params, nnopt_inst = create_model_arch
         model_out = nnopt_inst.scanning_models[-1]
         first_layer_config = model_out.get_layer(index=0).get_config()
-        assert first_layer_config['units'] == in_params[1]
+        assert first_layer_config['units'] == nnopt_inst.num_nodes
         
     def test_num_inputs(self, create_model_arch):
         in_params, nnopt_inst = create_model_arch
@@ -97,13 +97,13 @@ class TestAddModelToScanList:
         in_params, nnopt_inst = create_model_arch
         model_out = nnopt_inst.scanning_models[-1]
         first_layer_config = model_out.get_layer(index=0).get_config()
-        assert first_layer_config['activation'] == in_params[2]
+        assert first_layer_config['activation'] == nnopt_inst.hidden_act
     
     def test_output_func(self, create_model_arch):
         in_params, nnopt_inst = create_model_arch
         model_out = nnopt_inst.scanning_models[-1]
         output_layer_config = model_out.get_layer(index=-1).get_config()
-        assert output_layer_config['activation'] == in_params[3]
+        assert output_layer_config['activation'] == nnopt_inst.out_act
         
         
 
