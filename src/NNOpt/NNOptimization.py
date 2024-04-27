@@ -17,6 +17,7 @@ import math
 # TensorFlow outputs unnecessary log messages
 # GPU is working fine
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+import keras
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense
 from tensorflow.keras.callbacks import ModelCheckpoint
@@ -63,18 +64,18 @@ def get_num_features(features_in):
 
 class NNOptimizer:
     
-    # TO DO: generalize this for any computer
-    num_CPU_cores = 6
-    num_GPUs = 6
-    each_GPU_mem = 1024
-    if len(tf.config.list_physical_devices('GPU')) > 0:
-        split_GPU(num_GPUs, each_GPU_mem)
-        GPU_mode = True
-    else: 
-        GPU_mode = False
-    
     
     def __init__(self, X, y, test_per=0.3):
+        
+        # TO DO: generalize this for any computer
+        num_CPU_cores = 6
+        num_GPUs = 6
+        each_GPU_mem = 1024
+        if len(tf.config.list_physical_devices('GPU')) > 0:
+            split_GPU(num_GPUs, each_GPU_mem)
+            GPU_mode = True
+        else: 
+            GPU_mode = False
         
         if not isinstance(X, np.ndarray) and not isinstance(X, pd.Series) and \
             not isinstance(X, pd.DataFrame):
@@ -92,6 +93,9 @@ class NNOptimizer:
                                                             test_size=test_per,
                                                             random_state=752)
         
+        self.num_training_rows = len(y_train)
+        self.num_vali_rows = len(y_vali)
+        
         self.training_data = tf.data.Dataset.from_tensor_slices(
             (X_train, y_train))
         self.vali_data = tf.data.Dataset.from_tensor_slices(
@@ -108,7 +112,10 @@ class NNOptimizer:
         self.num_nodes = self.num_features + 4
         self.hidden_act = 'relu'
         self.out_act = 'linear'
-        self.batch_size = 254
+        self.buffer_size = 254
+        batch_size_guess = 64
+        actual_batch_size = int(batch_size_guess/num_GPUs) * num_GPUs
+        self.batch_size = actual_batch_size
         self.vali_perc = 0.3
         
         self.scanning_models = []
@@ -117,20 +124,36 @@ class NNOptimizer:
         
         self.opt_alg = 'Nadam'
         self.loss_func = 'mse'
+        
+        # AutoShard breaks everything
+        options = tf.data.Options()
+        options.experimental_distribute.auto_shard_policy = \
+            tf.data.experimental.AutoShardPolicy.OFF
+        
+        shuffled_training_data = self.training_data.shuffle(self.buffer_size)
+        self.batched_training_data = shuffled_training_data.batch(
+            self.batch_size, drop_remainder=True).with_options(options)
+        
+        self.batched_vali_data = self.vali_data.batch(
+            self.batch_size, drop_remainder=True).with_options(options)
+        
     
     
     def add_model_to_scan_list(self, lyrs, opt_alg):
         strategy = tf.distribute.MirroredStrategy()
+        # self.dist_batched_training_data = strategy.\
+        #     experimental_distribute_dataset(self.batched_training_data)
+        # self.dist_batched_vali_data = strategy.\
+        #     experimental_distribute_dataset(self.batched_vali_data)
         with strategy.scope():
             new_model = Sequential()
-            new_model.add(Dense(self.num_nodes, 
-                                input_shape=(self.num_features,), 
-                                activation=self.hidden_act))
-            for i in range(lyrs-1):
+            new_model.add(keras.Input(shape=(self.num_features,),
+                                      batch_size=self.batch_size))
+            for i in range(lyrs):
                 new_model.add(Dense(self.num_nodes, activation=self.hidden_act))
             new_model.add(Dense(1, activation=self.out_act))
             new_model.compile(loss=self.loss_func, optimizer=opt_alg)
-        self.scanning_models.append(new_model)
+            self.scanning_models.append(new_model)
         return
     
     
@@ -151,11 +174,13 @@ class NNOptimizer:
                                            start_from_epoch=eps/10,
                                            restore_best_weights=True)
             
-            fitting_results = model.fit(self.training_data,
-                                        epochs=eps, batch_size=self.batch_size,
-                                        validation_data=self.vali_data,
-                                        verbose=0, 
-                                        callbacks=[early_stopping])
+            training_steps = int(self.num_training_rows / self.batch_size)
+            vali_steps = int(self.num_vali_rows / self.batch_size)
+            
+            fitting_results = model.fit(self.batched_training_data,
+                                        epochs=eps,
+                                        validation_data=\
+                                            self.batched_vali_data)
             min_val_cost = round(min(fitting_results.history['val_loss']), 3)
             
             # model.load_weights(best_model_path)

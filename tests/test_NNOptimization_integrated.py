@@ -52,7 +52,7 @@ if __name__=='__main__':
     
     nnopt_inst = NNO.NNOptimizer(X, y)
     nnopt_inst.add_model_to_scan_list(3, 'Nadam')
-    nnopt_inst.add_model_to_scan_list(4, 'Adam')
+    nnopt_inst.add_model_to_scan_list(2, 'Adam')
     nnopt_inst.train_models(10)
     
     
