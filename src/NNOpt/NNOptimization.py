@@ -132,20 +132,22 @@ class NNOptimizer:
         
         shuffled_training_data = self.training_data.shuffle(self.buffer_size)
         self.batched_training_data = shuffled_training_data.batch(
-            self.batch_size, drop_remainder=True).with_options(options)
+            self.batch_size, drop_remainder=True).with_options(options).\
+            cache().prefetch(self.batch_size)
         
         self.batched_vali_data = self.vali_data.batch(
-            self.batch_size, drop_remainder=True).with_options(options)
+            self.batch_size, drop_remainder=True).with_options(options).\
+            cache().prefetch(self.batch_size)
         
-    
-    
+        
     def add_model_to_scan_list(self, lyrs, opt_alg):
-        strategy = tf.distribute.MirroredStrategy()
-        # self.dist_batched_training_data = strategy.\
-        #     experimental_distribute_dataset(self.batched_training_data)
-        # self.dist_batched_vali_data = strategy.\
-        #     experimental_distribute_dataset(self.batched_vali_data)
-        with strategy.scope():
+        # create strategy if it doesn't exist yet
+        if not hasattr(self, 'strategy'): 
+            self.strategy = tf.distribute.MirroredStrategy()
+        if opt_alg.lower() == 'nadam':
+            # need to use legacy nadam for distributed strategy
+            opt_alg = keras.optimizers.legacy.Nadam()
+        with self.strategy.scope():
             new_model = Sequential()
             new_model.add(keras.Input(shape=(self.num_features,),
                                       batch_size=self.batch_size))
@@ -161,29 +163,31 @@ class NNOptimizer:
         
         for model in self.scanning_models:
             rand_ID = gen_rand_ID()
-            # best_model_path = os.path.join('model_saves', 
-            #                                f'weights_{rand_ID}.hdf5')
-            # save model with best val_loss, not the end state model
-            # save_best_model = ModelCheckpoint(best_model_path, 
-            #                                   monitor='val_loss', 
-            #                                   save_best_only=True, 
-            #                                   save_weights_only=True)
+            
             early_stopping = EarlyStopping(monitor='val_loss',
                                            patience=eps/10,
                                            mode='min',
                                            start_from_epoch=eps/10,
                                            restore_best_weights=True)
             
+            check_point_path = os.path.join('model_saves', 
+                                            f'weights_{rand_ID}.hdf5')
+            save_model = ModelCheckpoint(check_point_path, 
+                                         monitor='val_loss', 
+                                         save_weights_only=True,
+                                         save_best_only=True)
+            
             training_steps = int(self.num_training_rows / self.batch_size)
             vali_steps = int(self.num_vali_rows / self.batch_size)
-            
             fitting_results = model.fit(self.batched_training_data,
                                         epochs=eps,
                                         validation_data=\
-                                            self.batched_vali_data)
+                                            self.batched_vali_data,
+                                        callbacks=[early_stopping,
+                                                   save_model],
+                                        verbose=0)
             min_val_cost = round(min(fitting_results.history['val_loss']), 3)
             
-            # model.load_weights(best_model_path)
             model_num_layers = len(model.layers) - 1
             model_compiler = model.get_compile_config()['optimizer']
             model_ID = f'{rand_ID}_{model_num_layers}_{model_compiler}'
