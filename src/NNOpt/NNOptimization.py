@@ -64,6 +64,7 @@ def get_num_features(features_in):
 
 class NNOptimizer:
     
+    strategy = tf.distribute.MirroredStrategy()
     
     def __init__(self, X, y, test_per=0.3):
         
@@ -122,7 +123,6 @@ class NNOptimizer:
         self.trained_val_costs = {}
         self.trained_models = {}
         
-        self.opt_alg = 'Nadam'
         self.loss_func = 'mse'
         
         # AutoShard breaks everything
@@ -140,22 +140,24 @@ class NNOptimizer:
             cache().prefetch(self.batch_size)
         
         
-    def add_model_to_scan_list(self, lyrs, opt_alg):
+    def add_model_to_scan_list(self, lyrs, opt_alg, bag_num=1):
         # create strategy if it doesn't exist yet
-        if not hasattr(self, 'strategy'): 
-            self.strategy = tf.distribute.MirroredStrategy()
+        # if not hasattr(self, 'strategy'): 
+        #     self.strategy = tf.distribute.MirroredStrategy()
         if opt_alg.lower() == 'nadam':
             # need to use legacy nadam for distributed strategy
             opt_alg = keras.optimizers.legacy.Nadam()
         with self.strategy.scope():
-            new_model = Sequential()
-            new_model.add(keras.Input(shape=(self.num_features,),
-                                      batch_size=self.batch_size))
-            for i in range(lyrs):
-                new_model.add(Dense(self.num_nodes, activation=self.hidden_act))
-            new_model.add(Dense(1, activation=self.out_act))
-            new_model.compile(loss=self.loss_func, optimizer=opt_alg)
-            self.scanning_models.append(new_model)
+            for i in range(bag_num):
+                new_model = Sequential()
+                new_model.add(keras.Input(shape=(self.num_features,),
+                                          batch_size=self.batch_size))
+                for i in range(lyrs):
+                    new_model.add(Dense(self.num_nodes, 
+                                        activation=self.hidden_act))
+                new_model.add(Dense(1, activation=self.out_act))
+                new_model.compile(loss=self.loss_func, optimizer=opt_alg)
+                self.scanning_models.append(new_model)
         return
     
     
@@ -189,8 +191,11 @@ class NNOptimizer:
             min_val_cost = round(min(fitting_results.history['val_loss']), 3)
             
             model_num_layers = len(model.layers) - 1
-            model_compiler = model.get_compile_config()['optimizer']
-            model_ID = f'{rand_ID}_{model_num_layers}_{model_compiler}'
+            model_optimizer = model.get_compile_config()['optimizer']
+            if not isinstance(model_optimizer, str):
+                # to account for nadam legacy usage
+                model_optimizer = model_optimizer['class_name']
+            model_ID = f'{rand_ID}_{model_num_layers}_{model_optimizer}'
             
             self.trained_models[model_ID] = model
             self.trained_val_costs[model_ID] = min_val_cost
@@ -202,56 +207,10 @@ class NNOptimizer:
 
 def gen_rand_ID():
     num_existing_models = len(os.listdir('model_saves'))
-    rand_num = int(abs(7.*np.random.randn(1))*10000 - num_existing_models)
+    rand_num = int(abs(7.*np.random.randn(1).item(0))*10000 - num_existing_models)
     rand_ID = str(rand_num) + str(num_existing_models)
     rand_ID = rand_ID.zfill(8)   
     return rand_ID
-
-
-def train_model(features_in, target_vals, layers_num, eps,
-                opt_alg='Nadam', loss_func='mse', batch_sz=64,
-                vali_perc=0.3):
-    
-    # check inputs
-    if type(vali_perc) is not float:
-        raise TypeError('Validation percentage must be float.')
-    if vali_perc > 1. or vali_perc == 0:
-        raise ValueError('Validation data percentage must be >0 and <1.')
-        
-    num_features = get_num_features(features_in)
-    
-    NN_model = init_model_arch(layers_num, num_features+4,
-                                 'relu', 'linear', num_features)
-    
-    # generate unique ID that won't exist already
-    num_existing_models = len(os.listdir('model_saves'))
-    rand_num = int(abs(7.*np.random.randn(1))*10000 - num_existing_models)
-    rand_ID = str(rand_num) + str(num_existing_models)
-    rand_ID = rand_ID.zfill(8)
-    best_model_path = os.path.join('model_saves', 
-                                   f'weights_{rand_ID}.hdf5')
-    # save model with best val_loss, not the end state model
-    save_best_model = ModelCheckpoint(best_model_path, monitor='val_loss', 
-                                  save_best_only=True, save_weights_only=True)
-    
-    early_stopping = EarlyStopping(monitor='val_loss',
-                                   patience=eps/10,
-                                   mode='min',
-                                   start_from_epoch=eps/10)
-    
-    NN_model.compile(loss=loss_func, optimizer=opt_alg)
-    fitting_results = NN_model.fit(features_in, target_vals, 
-                                 epochs=eps, batch_size=batch_sz,
-                                 validation_split=vali_perc, verbose=0,
-                                 callbacks=[save_best_model, early_stopping])
-    
-    # select the best model
-    NN_model.load_weights(best_model_path)
-    
-    min_val_cost = round(min(fitting_results.history['val_loss']), 3)
-    print(f'{layers_num}-layer model trained; min(val_cost) = {min_val_cost}')
-          
-    return fitting_results, NN_model
 
 
 def exp_bag_weighted_avg(val_losses, predictions):

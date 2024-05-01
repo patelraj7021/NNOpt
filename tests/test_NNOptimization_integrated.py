@@ -52,8 +52,8 @@ if __name__=='__main__':
     
     nnopt_inst = NNO.NNOptimizer(X, y)
     
-    nnopt_inst.add_model_to_scan_list(3, 'nadam')
-    nnopt_inst.add_model_to_scan_list(4, 'rmsprop')
+    nnopt_inst.add_model_to_scan_list(3, 'nadam', 3)
+    nnopt_inst.add_model_to_scan_list(4, 'rmsprop', 2)
     nnopt_inst.add_model_to_scan_list(6, 'adam')
     nnopt_inst.train_models(10)
         

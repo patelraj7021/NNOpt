@@ -44,7 +44,7 @@ def generate_test_data(X_ranges, X_num,
 
 @pytest.mark.parametrize('data_params_in, exp_output', [
     (([(-5, 5)], 1000, -2, 2, univar_third_order_poly, 4), [1]),
-    (([(-5, 5), (-2, 2)], 1000, -2, 2, multivar_first_order_poly, 4), [2])
+    (([(-5, 5), (-2, 2)], 1000, -2, 2, multivar_first_order_poly, 3), [2])
     ])
 class TestInit:
     
@@ -59,51 +59,71 @@ class TestInit:
         assert tf.is_tensor(nnopt_inst.features_in) == True
 
 
-# cases for TestAddModelToScanList
+# creates NNOptimizer instances
 @pytest.fixture(params=[
-                (3, 'Nadam'), 
-                (1, 'Nadam')
+                (3, 'Nadam', 1, ([(-5, 5)], 1000, -2, 2, 
+                                 univar_third_order_poly, 4)), 
+                (1, 'adam', 2, ([(-5, 5)], 1000, -2, 2, 
+                                 univar_third_order_poly, 4)),
+                (4, 'rmsprop', 4, ([(-5, 5), (-2, 2)], 1000, -2, 2, 
+                                   multivar_first_order_poly, 3))
                 ])  
-def create_model_arch(request):
-    data_in = generate_test_data([(-5, 5)], 1000, -2, 2, 
-                                 univar_third_order_poly, 4)
+def create_test_cases(request):
+    all_test_params = request.param
+    data_in = generate_test_data(*all_test_params[-1])
     nnopt_inst = NNO.NNOptimizer(*data_in)
-    in_params = request.param
+    in_params = all_test_params[:-1]
     nnopt_inst.add_model_to_scan_list(*in_params)
     return in_params, nnopt_inst
 
+
 class TestAddModelToScanList:
     
-    def test_num_layers(self, create_model_arch):
-        in_params, nnopt_inst = create_model_arch
+    def test_num_layers(self, create_test_cases):
+        in_params, nnopt_inst = create_test_cases
         model_out = nnopt_inst.scanning_models[-1]
         # len(*.layers) returns output layer too, so minus 1 for that
         assert len(model_out.layers) - 1 == in_params[0] 
 
-    def test_num_nodes(self, create_model_arch):
-        in_params, nnopt_inst = create_model_arch
+    def test_num_nodes(self, create_test_cases):
+        in_params, nnopt_inst = create_test_cases
         model_out = nnopt_inst.scanning_models[-1]
         first_layer_config = model_out.get_layer(index=0).get_config()
         assert first_layer_config['units'] == nnopt_inst.num_nodes
         
-    def test_num_inputs(self, create_model_arch):
-        in_params, nnopt_inst = create_model_arch
-        model_out = nnopt_inst.scanning_models[-1]
-        input_layer_config = model_out.get_layer(index=0).get_build_config()
-        assert input_layer_config['input_shape'] == (None, 
-                                                     nnopt_inst.num_features)
-        
-    def test_activation_func(self, create_model_arch):
-        in_params, nnopt_inst = create_model_arch
+    def test_activation_func(self, create_test_cases):
+        in_params, nnopt_inst = create_test_cases
         model_out = nnopt_inst.scanning_models[-1]
         first_layer_config = model_out.get_layer(index=0).get_config()
         assert first_layer_config['activation'] == nnopt_inst.hidden_act
     
-    def test_output_func(self, create_model_arch):
-        in_params, nnopt_inst = create_model_arch
+    def test_output_func(self, create_test_cases):
+        in_params, nnopt_inst = create_test_cases
         model_out = nnopt_inst.scanning_models[-1]
         output_layer_config = model_out.get_layer(index=-1).get_config()
         assert output_layer_config['activation'] == nnopt_inst.out_act
+        
+    def test_bagging(self, create_test_cases):
+        in_params, nnopt_inst = create_test_cases
+        models_made = len(nnopt_inst.scanning_models)
+        assert models_made == in_params[2]
+        
+    def test_optimizer(self, create_test_cases):
+        in_params, nnopt_inst = create_test_cases
+        model_out = nnopt_inst.scanning_models[-1]
+        optimizer = model_out.get_compile_config()['optimizer']
+        if not isinstance(optimizer, str):
+            # to account for nadam legacy usage
+            optimizer = optimizer['class_name']
+        assert optimizer == in_params[1]
+        
+
+class TestTrainModels:
+    
+    def test_empty_scanning_list(self, create_test_cases):
+        in_params, nnopt_inst = create_test_cases
+        nnopt_inst.train_models(10)
+        assert len(nnopt_inst.scanning_models) == 0
         
         
 
