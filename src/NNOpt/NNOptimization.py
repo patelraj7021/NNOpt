@@ -66,7 +66,7 @@ class NNOptimizer:
     
     strategy = tf.distribute.MirroredStrategy()
     
-    def __init__(self, X, y, test_per=0.3):
+    def __init__(self, X, y, vali_per=0.3):
         
         # TO DO: generalize this for any computer
         num_CPU_cores = 6
@@ -86,35 +86,24 @@ class NNOptimizer:
                 raise TypeError(
                 'y output must be a NumPy array or pandas Series.')
         
-        X_train, X_test, y_train, y_test = train_test_split(X, y, 
-                                                            test_size=test_per,
-                                                            random_state=7021)
-        
-        X_train, X_vali, y_train, y_vali = train_test_split(X_train, y_train,
-                                                            test_size=test_per,
+        X_train, X_vali, y_train, y_vali = train_test_split(X, y,
+                                                            test_size=vali_per,
                                                             random_state=752)
         
         self.num_training_rows = len(y_train)
         self.num_vali_rows = len(y_vali)
         
-        self.training_data = tf.data.Dataset.from_tensor_slices(
+        training_data = tf.data.Dataset.from_tensor_slices(
             (X_train, y_train))
-        self.vali_data = tf.data.Dataset.from_tensor_slices(
+        vali_data = tf.data.Dataset.from_tensor_slices(
             (X_vali, y_vali))
-        self.testing_data = tf.data.Dataset.from_tensor_slices(
-            (X_test, y_test))
         
-        self.features_in = tf.convert_to_tensor(X_train)
-        self.target_vals = tf.convert_to_tensor(y_train)
-        self.testing_X = tf.convert_to_tensor(X_test)
-        self.testing_y = tf.convert_to_tensor(y_test)
-        
-        self.num_features = get_num_features(self.features_in)
+        self.num_features = get_num_features(X)
         self.num_nodes = self.num_features + 4
         self.hidden_act = 'relu'
         self.out_act = 'linear'
-        self.buffer_size = 254
-        batch_size_guess = 64
+        self.buffer_size = 256
+        batch_size_guess = 256
         actual_batch_size = int(batch_size_guess/num_GPUs) * num_GPUs
         self.batch_size = actual_batch_size
         self.vali_perc = 0.3
@@ -130,12 +119,12 @@ class NNOptimizer:
         options.experimental_distribute.auto_shard_policy = \
             tf.data.experimental.AutoShardPolicy.OFF
         
-        shuffled_training_data = self.training_data.shuffle(self.buffer_size)
+        shuffled_training_data = training_data.shuffle(self.buffer_size)
         self.batched_training_data = shuffled_training_data.batch(
             self.batch_size, drop_remainder=True).with_options(options).\
             cache().prefetch(self.batch_size)
         
-        self.batched_vali_data = self.vali_data.batch(
+        self.batched_vali_data = vali_data.batch(
             self.batch_size, drop_remainder=True).with_options(options).\
             cache().prefetch(self.batch_size)
         
@@ -163,6 +152,9 @@ class NNOptimizer:
     
     def train_models(self, eps):
         
+        if len(self.scanning_models) == 0:
+            raise RuntimeError('No models in scanning list.')
+        
         for model in self.scanning_models:
             rand_ID = gen_rand_ID()
             
@@ -179,8 +171,6 @@ class NNOptimizer:
                                          save_weights_only=True,
                                          save_best_only=True)
             
-            training_steps = int(self.num_training_rows / self.batch_size)
-            vali_steps = int(self.num_vali_rows / self.batch_size)
             fitting_results = model.fit(self.batched_training_data,
                                         epochs=eps,
                                         validation_data=\
@@ -203,11 +193,47 @@ class NNOptimizer:
         self.scanning_models = []
         
         return
+    
+    
+    def predict(self, pred_X):
+        
+        if len(self.final_models) == 0:
+            raise RuntimeError('Optimized models not loaded in object.')
+        if not isinstance(pred_X, np.ndarray) \
+            and not isinstance(pred_X, pd.Series) \
+            and not isinstance(pred_X, pd.DataFrame):
+                raise TypeError(
+                'X input must be a NumPy array or pandas Series/Dataframe.')
+        
+        pred_data = tf.data.Dataset.from_tensor_slices(pred_X)
+        # AutoShard breaks everything
+        options = tf.data.Options()
+        options.experimental_distribute.auto_shard_policy = \
+            tf.data.experimental.AutoShardPolicy.OFF
+        self.batched_pred_data = pred_data.batch(
+            self.batch_size, drop_remainder=True).with_options(options).\
+            cache().prefetch(self.batch_size)
+        
+        predictions = []
+        
+        for model in self.final_models:
+            predictions.append(model.predict(self.batched_pred_data))
+            
+        bagged_pred = exp_bag_weighted_avg(self.final_model_val_costs,
+                                           predictions)
+            
+        return bagged_pred
+    
+    
+    def predict(self):
+        
+        return
 
 
 def gen_rand_ID():
     num_existing_models = len(os.listdir('model_saves'))
-    rand_num = int(abs(7.*np.random.randn(1).item(0))*10000 - num_existing_models)
+    rand_num = int(abs(7.*np.random.randn(1).item(0))*10000 \
+                   - num_existing_models)
     rand_ID = str(rand_num) + str(num_existing_models)
     rand_ID = rand_ID.zfill(8)   
     return rand_ID
@@ -232,31 +258,6 @@ def exp_bag_weighted_avg(val_losses, predictions):
     weighed_average = weighed_sum / np.sum(weights)
     
     return weighed_average
-
-
-def bag_models(features_in, target_vals, bag_quantity, layers_num, eps,
-               testing_X, opt_alg='Nadam', loss_func='mse', batch_sz=64,
-               vali_perc=0.3):
-    
-    predicted_bag = []
-    min_val_loss_bag = []
-    
-    for i in range(bag_quantity):
-        fitting_results, NN_model = train_model(features_in, target_vals,
-                                                layers_num, eps, opt_alg, 
-                                                loss_func, batch_sz, vali_perc)
-        
-        predicted_vals = NN_model.predict(testing_X)
-        predicted_bag.append(predicted_vals)
-        min_val_loss = min(fitting_results.history['val_loss'])
-        min_val_loss_bag.append(min_val_loss)
-    
-    predicted_bag_array = np.concatenate(predicted_bag, axis=1)  
-    min_val_loss_bag_array = np.array(min_val_loss_bag)
-    weighted_preds = exp_bag_weighted_avg(min_val_loss_bag_array, 
-                                          predicted_bag_array)
-    
-    return min_val_loss_bag_array, weighted_preds
 
 
 def check_num_layers(features_in, target_vals, num_layers_list, eps, 

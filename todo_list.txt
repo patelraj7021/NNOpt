@@ -1,9 +1,0 @@
-Task breakdown:
-1. For NN config optimization:
- - check coarsely first (2, 32, 64, 96, 128)
- - scan through popular choices for optimizer
- - scan through finer layer choices with longer epochs
- - vary batch size? probably not, but look into it
- - get train_model func to return model, try predicting
- - check what's happening with cost_comp return object
- - convert to async map?

@@ -52,11 +52,6 @@ class TestInit:
         data_in = generate_test_data(*data_params_in)
         nnopt_inst = NNO.NNOptimizer(*data_in)
         assert nnopt_inst.num_features == exp_output[0]
-    
-    def test_tensor_conversion(self, data_params_in, exp_output):
-        data_in = generate_test_data(*data_params_in)
-        nnopt_inst = NNO.NNOptimizer(*data_in)
-        assert tf.is_tensor(nnopt_inst.features_in) == True
 
 
 # creates NNOptimizer instances
@@ -74,6 +69,12 @@ def create_test_cases(request):
     nnopt_inst = NNO.NNOptimizer(*data_in)
     in_params = all_test_params[:-1]
     nnopt_inst.add_model_to_scan_list(*in_params)
+    return in_params, nnopt_inst
+
+@pytest.fixture
+def train_test_cases(create_test_cases):
+    in_params, nnopt_inst = create_test_cases
+    nnopt_inst.train_models(10)
     return in_params, nnopt_inst
 
 
@@ -120,10 +121,21 @@ class TestAddModelToScanList:
 
 class TestTrainModels:
     
-    def test_empty_scanning_list(self, create_test_cases):
-        in_params, nnopt_inst = create_test_cases
-        nnopt_inst.train_models(10)
+    def test_empty_scanning_list(self, train_test_cases):
+        in_params, nnopt_inst = train_test_cases
         assert len(nnopt_inst.scanning_models) == 0
+    
+    def test_total_model_num(self, train_test_cases):
+        in_params, nnopt_inst = train_test_cases
+        assert len(nnopt_inst.trained_models) == in_params[2]
+        
+
+class TestPredict:
+    
+    def test_predictions(self, train_test_cases):
+        in_params, nnopt_inst = train_test_cases
+        
+        assert True == True
         
         
 
