@@ -74,7 +74,7 @@ def create_test_cases(request):
 @pytest.fixture
 def train_test_cases(create_test_cases):
     in_params, nnopt_inst = create_test_cases
-    nnopt_inst.train_models(10)
+    nnopt_inst.train_scanning_models(10)
     return in_params, nnopt_inst
 
 

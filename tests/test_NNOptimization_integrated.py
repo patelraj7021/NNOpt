@@ -39,23 +39,18 @@ def create_third_order_poly_test(x_start, x_end, num_x,
     noise = np.random.normal(-noise_amp, noise_amp, len(x_range))
     return x_range, y_poly+noise
         
-    
-# test the model training loop
-# class TestNNTraining:
-    
-#     def test_
         
 
 if __name__=='__main__':
 
     X, y = create_third_order_poly_test(-5, 5, 2000, -2, 2)
     
-    nnopt_inst = NNO.NNOptimizer(X, y)
-    
+    nnopt_inst = NNO.NNOptimizer(X, y)    
+    nnopt_inst.GPU_mode = False
     nnopt_inst.add_model_to_scan_list(3, 'nadam', 3)
-    nnopt_inst.add_model_to_scan_list(4, 'rmsprop', 2)
-    nnopt_inst.add_model_to_scan_list(6, 'adam')
-    nnopt_inst.train_models(10)
+    nnopt_inst.add_model_to_scan_list(4, 'rmsprop', 3)
+    nnopt_inst.add_model_to_scan_list(6, 'adam', 3)
+    nnopt_inst.train_scanning_models(10)
         
     
     
