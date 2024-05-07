@@ -47,10 +47,8 @@ if __name__=='__main__':
     
     nnopt_inst = NNO.NNOptimizer(X, y)    
     nnopt_inst.GPU_mode = False
-    nnopt_inst.add_model_to_scan_list(3, 'nadam', 3)
-    nnopt_inst.add_model_to_scan_list(4, 'rmsprop', 3)
-    nnopt_inst.add_model_to_scan_list(6, 'adam', 3)
-    nnopt_inst.train_scanning_models(10)
+    nnopt_inst.find_best_opt_alg()
+    nnopt_inst.val_costs_df.to_csv('df_test_output.csv')
         
     
     

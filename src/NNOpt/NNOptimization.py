@@ -97,7 +97,7 @@ class NNOptimizer:
             cache().prefetch(self.batch_size)
         
         
-    def add_model_to_scan_list(self, lyrs, opt_alg, bag_num=1):
+    def add_model_to_scan_list(self, lyrs, opt_alg, bag_num=5):
         if opt_alg.lower() == 'nadam':
             # need to use legacy nadam for distributed strategy
             opt_alg = keras.optimizers.legacy.Nadam()
@@ -120,6 +120,37 @@ class NNOptimizer:
         return
     
     
+    def find_best_opt_alg(self):
+        # run this before looking for best num_layers
+        keras_opt_algs = ['SGD', 'rmsprop', 'adam',
+                          'adadelta', 'adagrad', 'adamax', 
+                          'nadam', 'ftrl']
+        for opt_alg in keras_opt_algs:
+            self.add_model_to_scan_list(4, opt_alg)
+        self.train_scanning_models(100)
+        
+        return
+    
+    
+    def find_best_num_layers(self):
+        # coarse search
+        coarse_search_num = 8
+        max_num_layers = gen_max_num_layers(self.num_features)
+        coarse_list = make_num_layers_list_log2(2, max_num_layers, 
+                                                coarse_search_num)
+        for num_layers in coarse_list:
+            self.add_model_to_scan_list(num_layers, self.best_opt_alg)
+        
+        return
+    
+    
+    def find_NN(self):
+        self.find_best_opt_alg()
+        self.find_best_num_layers()
+        
+        return
+    
+    
     def train_model(self, model):
         
         rand_ID = gen_rand_ID()
@@ -137,6 +168,7 @@ class NNOptimizer:
                                      save_weights_only=True,
                                      save_best_only=True)
         
+        start_time = time.time()
         fitting_results = model.fit(self.batched_training_data,
                                     epochs=self.eps,
                                     validation_data=\
@@ -144,15 +176,18 @@ class NNOptimizer:
                                     callbacks=[early_stopping,
                                                save_model],
                                     verbose=0)
+        end_time = time.time()
+        delta = end_time - start_time
+        
         min_val_cost = round(min(fitting_results.history['val_loss']), 
                              3)
         
-        model_num_layers = len(model.layers) - 1
+        model_layers = len(model.layers) - 1
         model_opt = model.get_compile_config()['optimizer']
         if not isinstance(model_opt, str):
             # to account for nadam legacy usage
             model_opt = model_opt['class_name']
-        model_ID = f'{rand_ID}_{model_num_layers}_{model_opt}_{self.eps}'
+        model_ID = f'{rand_ID}_{model_layers}_{model_opt}_{self.eps}_{delta}'
         
         return model_ID, model, min_val_cost
     
@@ -162,6 +197,7 @@ class NNOptimizer:
         if len(self.scanning_models) == 0:
             raise RuntimeError('No models in scanning list.')
         
+        # not great practice but need to do this to avoid starmap
         self.eps = eps
         
         if self.GPU_mode:
@@ -187,7 +223,7 @@ class NNOptimizer:
                                               orient='index',
                                               columns=['val_cost'])
         val_costs_df = val_costs_df.reset_index()
-        val_costs_df[['ID', 'num_layers', 'optimizer', 'epochs']] = \
+        val_costs_df[['ID', 'num_layers', 'optimizer', 'epochs', 'dt']] = \
             val_costs_df['index'].str.split('_', expand=True)
         val_costs_df = val_costs_df.set_index('ID').drop(columns=['index'])
         self.val_costs_df = val_costs_df
@@ -222,7 +258,28 @@ class NNOptimizer:
                                            predictions)
             
         return bagged_pred
+
     
+def make_num_layers_list_log2(start_num, end_num, test_num):
+    float_array = np.logspace(np.log2(start_num), np.log2(end_num), 
+                              num=test_num, base=2)
+    int_array = float_array.astype(int)
+    remove_dups_set = set(int_array)
+    ordered_list = list(remove_dups_set)
+    ordered_list.sort()
+    
+    return ordered_list 
+   
+
+def gen_max_num_layers(num_features):
+    # defined so that num_features = 1 -> max_num_layers = 128
+    # num_features = 16 -> max_num_layers = 64
+    b = -np.log(0.5) / 15
+    a = 128 / np.exp(-b)
+    # lowest should be 32
+    max_num_layers = max(32, int(a*np.exp(-b*num_features))) 
+    
+    return max_num_layers
     
     
 def split_GPU(num_splits, mem_each_split):
@@ -346,27 +403,6 @@ def divide_chunks(list_in, len_chunk):
     for i in range(0, len(list_in), len_chunk):  
         yield list_in[i:i + len_chunk] 
 
-
-def make_num_layers_list(start_num, end_num, test_num):
-    float_array = np.logspace(np.log2(start_num), np.log2(end_num), 
-                              num=test_num, base=2)
-    int_array = float_array.astype(int)
-    remove_dups_set = set(int_array)
-    ordered_list = list(remove_dups_set)
-    ordered_list.sort()
-    
-    return ordered_list
-
-
-def gen_max_num_layers(num_features):
-    # defined so that num_features = 1 -> max_num_layers = 128
-    # num_features = 16 -> max_num_layers = 64
-    b = -np.log(0.5) / 15
-    a = 128 / np.exp(-b)
-    # lowest should be 32
-    max_num_layers = max(32, int(a*np.exp(-b*num_features))) 
-    
-    return max_num_layers
 
 
 def find_best_num_layers(features_in, target_vals, testing_X):
