@@ -8,7 +8,7 @@ Created on Fri Feb 16 21:43:17 2024
 import time
 import os
 import random
-from pathos.multiprocessing import ProcessPool
+from multiprocessing import Pool
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
@@ -33,13 +33,14 @@ class NNOptimizer:
     if len(tf.config.list_physical_devices('GPU')) > 0:
         strategy = tf.distribute.MirroredStrategy()
     
-    def __init__(self, X, y, vali_per=0.3):
+    def __init__(self, X, y, vali_per=0.3, force_CPU=False):
         
         # TO DO: generalize this for any computer
         self.num_CPU_cores = 6
         self.num_GPUs = 6
         self.each_GPU_mem = 1024
-        if len(tf.config.list_physical_devices('GPU')) > 0:
+        if len(tf.config.list_physical_devices('GPU')) > 0 and \
+            not force_CPU:
             split_GPU(self.num_GPUs, self.each_GPU_mem)
             self.GPU_mode = True
         else: 
@@ -120,14 +121,14 @@ class NNOptimizer:
         return
     
     
-    def find_best_opt_alg(self):
+    def find_best_opt_alg(self, eps=100):
         # run this before looking for best num_layers
         keras_opt_algs = ['SGD', 'rmsprop', 'adam',
                           'adadelta', 'adagrad', 'adamax', 
                           'nadam', 'ftrl']
         for opt_alg in keras_opt_algs:
             self.add_model_to_scan_list(4, opt_alg)
-        self.train_scanning_models(100)
+        self.train_scanning_models(eps)
         
         return
     
@@ -206,8 +207,14 @@ class NNOptimizer:
                 self.trained_models[model_ID] = model
                 self.trained_val_costs[model_ID] = min_val_cost
         else:
-            with ProcessPool(self.num_CPU_cores) as p:
-                training_out = p.map(self.train_model, self.scanning_models)
+            training_out = multiprocessing_wrapper_func(self,
+                                                        self.scanning_models, 
+                                                        self.num_CPU_cores)
+            # with Pool(self.num_CPU_cores) as p:
+            #     pool_input = list(zip([self]*len(self.scanning_models), 
+            #                           self.scanning_models))
+            #     training_out = p.map(multiprocessing_wrapper_func, 
+            #                          pool_input)
             for output in training_out:
                 self.trained_models[output[0]] = output[1]
                 self.trained_val_costs[output[0]] = output[2]
@@ -258,6 +265,16 @@ class NNOptimizer:
                                            predictions)
             
         return bagged_pred
+
+
+def multiprocessing_wrapper_func(self_obj, scanning_models, num_CPU_cores):
+    pool_input = []
+    for model in scanning_models:
+        pool_input.append(self_obj)
+        pool_input.append(model)
+    with Pool(num_CPU_cores) as p:
+        result = p.starmap(NNOptimizer.train_model, pool_input)
+    return result
 
     
 def make_num_layers_list_log2(start_num, end_num, test_num):

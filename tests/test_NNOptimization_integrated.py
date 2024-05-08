@@ -45,9 +45,8 @@ if __name__=='__main__':
 
     X, y = create_third_order_poly_test(-5, 5, 2000, -2, 2)
     
-    nnopt_inst = NNO.NNOptimizer(X, y)    
-    nnopt_inst.GPU_mode = False
-    nnopt_inst.find_best_opt_alg()
+    nnopt_inst = NNO.NNOptimizer(X, y, force_CPU=True)    
+    nnopt_inst.find_best_opt_alg(eps=10)
     nnopt_inst.val_costs_df.to_csv('df_test_output.csv')
         
     
