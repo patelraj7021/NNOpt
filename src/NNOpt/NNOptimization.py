@@ -8,7 +8,10 @@ Created on Fri Feb 16 21:43:17 2024
 import time
 import os
 import random
-from multiprocessing import Pool
+# import multiprocessing
+# multiprocessing.set_start_method('spawn')
+# from multiprocessing import Pool
+import concurrent.futures
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
@@ -33,7 +36,9 @@ class NNOptimizer:
     if len(tf.config.list_physical_devices('GPU')) > 0:
         strategy = tf.distribute.MirroredStrategy()
     
-    def __init__(self, X, y, vali_per=0.3, force_CPU=False):
+    
+    def __init__(self, X, y, 
+                 vali_per=0.3, force_CPU=False, single_core=False):
         
         # TO DO: generalize this for any computer
         self.num_CPU_cores = 6
@@ -153,7 +158,7 @@ class NNOptimizer:
     
     
     def train_model(self, model):
-        
+
         rand_ID = gen_rand_ID()
         
         early_stopping = EarlyStopping(monitor='val_loss',
@@ -207,14 +212,18 @@ class NNOptimizer:
                 self.trained_models[model_ID] = model
                 self.trained_val_costs[model_ID] = min_val_cost
         else:
-            training_out = multiprocessing_wrapper_func(self,
-                                                        self.scanning_models, 
-                                                        self.num_CPU_cores)
+            # training_out = multiprocessing_wrapper_func(self,
+            #                                             self.scanning_models, 
+            #                                             self.num_CPU_cores)
             # with Pool(self.num_CPU_cores) as p:
             #     pool_input = list(zip([self]*len(self.scanning_models), 
             #                           self.scanning_models))
             #     training_out = p.map(multiprocessing_wrapper_func, 
             #                          pool_input)
+            pool = concurrent.futures.ThreadPoolExecutor(
+                max_workers=self.num_CPU_cores)
+            for i in self.num_CPU_cores:
+                
             for output in training_out:
                 self.trained_models[output[0]] = output[1]
                 self.trained_val_costs[output[0]] = output[2]
@@ -268,12 +277,16 @@ class NNOptimizer:
 
 
 def multiprocessing_wrapper_func(self_obj, scanning_models, num_CPU_cores):
-    pool_input = []
-    for model in scanning_models:
-        pool_input.append(self_obj)
-        pool_input.append(model)
+    # pool_input = []
+    pool_inputs = list(zip([self_obj]*len(scanning_models), scanning_models))
+    # for model in scanning_models:
+    #     pool_input.append(self_obj)
+    #     pool_input.append(model)
+    # result = []
+    # for pool_input in pool_inputs:        
+    #     result.append(NNOptimizer.train_model(pool_input[0], pool_input[1]))
     with Pool(num_CPU_cores) as p:
-        result = p.starmap(NNOptimizer.train_model, pool_input)
+        result = p.starmap(NNOptimizer.train_model, pool_inputs)
     return result
 
     
