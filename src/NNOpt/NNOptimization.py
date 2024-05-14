@@ -185,17 +185,21 @@ class NNOptimizer:
         end_time = time.time()
         delta = end_time - start_time
         
-        min_val_cost = round(min(fitting_results.history['val_loss']), 
-                             3)
+        min_val_cost = min(fitting_results.history['val_loss'])
+        min_val_epoch = np.argmin(fitting_results.history['val_loss']) + 1
         
         model_layers = len(model.layers) - 1
         model_opt = model.get_compile_config()['optimizer']
         if not isinstance(model_opt, str):
             # to account for nadam legacy usage
             model_opt = model_opt['class_name']
-        model_ID = f'{rand_ID}_{model_layers}_{model_opt}_{self.eps}_{delta}'
+            
+        dict_entry = [model_layers, model_opt, self.eps, 
+                      delta, min_val_cost, min_val_epoch]
+        # model_ID = f'{rand_ID}_{model_layers}_{model_opt}_{self.eps}_{delta}'
+        model_ID = rand_ID
         
-        return model_ID, model, min_val_cost
+        return model_ID, model, dict_entry
     
     
     def train_scanning_models(self, eps):
@@ -212,17 +216,9 @@ class NNOptimizer:
                 self.trained_models[model_ID] = model
                 self.trained_val_costs[model_ID] = min_val_cost
         else:
-            # training_out = multiprocessing_wrapper_func(self,
-            #                                             self.scanning_models, 
-            #                                             self.num_CPU_cores)
-            # with Pool(self.num_CPU_cores) as p:
-            #     pool_input = list(zip([self]*len(self.scanning_models), 
-            #                           self.scanning_models))
-            #     training_out = p.map(multiprocessing_wrapper_func, 
-            #                          pool_input)
-            pool = concurrent.futures.ThreadPoolExecutor(
-                max_workers=self.num_CPU_cores)
-            for i in self.num_CPU_cores:
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                training_out = pool.map(self.train_model, 
+                                        self.scanning_models)
                 
             for output in training_out:
                 self.trained_models[output[0]] = output[1]
@@ -237,11 +233,17 @@ class NNOptimizer:
     def update_val_costs_df(self):
         val_costs_df = pd.DataFrame.from_dict(self.trained_val_costs,
                                               orient='index',
-                                              columns=['val_cost'])
-        val_costs_df = val_costs_df.reset_index()
-        val_costs_df[['ID', 'num_layers', 'optimizer', 'epochs', 'dt']] = \
-            val_costs_df['index'].str.split('_', expand=True)
-        val_costs_df = val_costs_df.set_index('ID').drop(columns=['index'])
+                                              columns=['num_layers',
+                                                       'optimizer',
+                                                       'epochs',
+                                                       'dt',
+                                                       'min_val_cost',
+                                                       'min_val_epoch'])
+        val_costs_df.index.name = 'model_ID'
+        val_costs_df['dt_per_epoch'] = val_costs_df['dt'] / \
+            val_costs_df['epochs']
+        val_costs_df['dt_to_min_val'] = val_costs_df['dt_per_epoch'] * \
+            val_costs_df['min_val_epoch']
         self.val_costs_df = val_costs_df
         return
     
@@ -275,21 +277,8 @@ class NNOptimizer:
             
         return bagged_pred
 
-
-def multiprocessing_wrapper_func(self_obj, scanning_models, num_CPU_cores):
-    # pool_input = []
-    pool_inputs = list(zip([self_obj]*len(scanning_models), scanning_models))
-    # for model in scanning_models:
-    #     pool_input.append(self_obj)
-    #     pool_input.append(model)
-    # result = []
-    # for pool_input in pool_inputs:        
-    #     result.append(NNOptimizer.train_model(pool_input[0], pool_input[1]))
-    with Pool(num_CPU_cores) as p:
-        result = p.starmap(NNOptimizer.train_model, pool_inputs)
-    return result
-
     
+
 def make_num_layers_list_log2(start_num, end_num, test_num):
     float_array = np.logspace(np.log2(start_num), np.log2(end_num), 
                               num=test_num, base=2)
@@ -352,7 +341,7 @@ def gen_rand_ID():
     rand_num = int(abs(7.*np.random.randn(1).item(0))*10000 \
                    - num_existing_models)
     rand_ID = str(rand_num) + str(num_existing_models)
-    rand_ID = rand_ID.zfill(8)   
+    rand_ID = rand_ID.zfill(8)[:8]
     return rand_ID
 
 
