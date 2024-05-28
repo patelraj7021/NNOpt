@@ -104,9 +104,9 @@ class NNOptimizer:
         
         
     def add_model_to_scan_list(self, lyrs, opt_alg, bag_num=5):
-        if opt_alg.lower() == 'nadam':
-            # need to use legacy nadam for distributed strategy
-            opt_alg = keras.optimizers.legacy.Nadam()
+        # if opt_alg.lower() == 'nadam':
+        #     # need to use legacy nadam for distributed strategy
+        #     opt_alg = keras.optimizers.legacy.Nadam()
         if self.GPU_mode:
             # strategy is only needed for tensorflow GPU case
             scope_obj = self.strategy.scope()
@@ -126,14 +126,40 @@ class NNOptimizer:
         return
     
     
-    def find_best_opt_alg(self, eps=100):
+    def find_best_opt_alg(self, eps=100, bag_num=10):
         # run this before looking for best num_layers
-        keras_opt_algs = ['SGD', 'rmsprop', 'adam',
+        keras_opt_algs = ['rmsprop', 'adam',
                           'adadelta', 'adagrad', 'adamax', 
-                          'nadam', 'ftrl']
+                          'nadam', 
+                          'ftrl']
         for opt_alg in keras_opt_algs:
-            self.add_model_to_scan_list(4, opt_alg)
+            self.add_model_to_scan_list(bag_num, opt_alg)
         self.train_scanning_models(eps)
+        
+        val_cost_lows = self.val_costs_df.\
+            groupby('optimizer')['min_val_cost'].median()
+        val_cost_lows = self.val_costs_df.\
+            groupby('optimizer')['min_val_cost'].quantile(0.16)
+        val_cost_highs = self.val_costs_df.\
+            groupby('optimizer')['min_val_cost'].quantile(0.84)
+        dt_val_cost_meds = self.val_costs_df.\
+            groupby('optimizer')['dt_to_min_val'].median()
+        dt_val_cost_lows = self.val_costs_df.\
+            groupby('optimizer')['dt_to_min_val'].quantile(0.16)
+        dt_val_cost_highs = self.val_costs_df.\
+            groupby('optimizer')['dt_to_min_val'].quantile(0.84)
+            
+        opt_alg_val_costs_df = pd.concat([val_cost_lows,
+                                          val_cost_lows,
+                                          val_cost_highs,
+                                          dt_val_cost_lows,
+                                          dt_val_cost_meds,
+                                          dt_val_cost_highs], axis=1)
+        opt_alg_val_costs_df.columns = ['val_cost_low', 'val_cost_med',
+                                        'val_cost_high', 'dt_low', 'dt_med',
+                                        'dt_high']
+        self.opt_alg_val_costs_df = opt_alg_val_costs_df
+        self.val_costs_df = pd.DataFrame()
         
         return
     

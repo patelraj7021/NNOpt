@@ -46,7 +46,7 @@ if __name__=='__main__':
     
     nnopt_inst = NNO.NNOptimizer(X, y, force_CPU=True)    
     nnopt_inst.find_best_opt_alg(eps=10)
-    nnopt_inst.val_costs_df.to_csv('df_test_output.csv')
+    nnopt_inst.opt_alg_val_costs_df.to_csv('df_test_output.csv')
     # print(nnopt_inst.GPU_mode)
         
     
